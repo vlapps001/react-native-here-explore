@@ -19,4 +19,6 @@ export { Marker, type MarkerProps } from './features/marker/MarkerView';
 
 export { Pin, type PinProps } from './features/pin/PinView';
 
+export { useNavigation } from "./features/navigation"
+
 export * from './types';
