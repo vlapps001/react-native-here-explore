@@ -1,4 +1,5 @@
 import { NativeModules } from 'react-native';
+console.log('NativeModules', NativeModules)
 import { LINKING_ERROR } from '../../constants';
 
 const NAME = 'NavigationModule';
@@ -10,7 +11,7 @@ type NavigationType = {
 /// @ts-expect-error
 const isTurboModuleEnabled = global.__turboModuleProxy != null;
 const Module = isTurboModuleEnabled
-  ? require('./specs/NavigationModule').default
+  ? require('./specs/NativeNavigation').default
   : NativeModules[NAME];
 
 const RCTNavigation = Module
@@ -25,14 +26,12 @@ const RCTNavigation = Module
     );
 
 export function useNavigation() {
-  async function startNavigation(
-    routeJson, isSimulate, resolve,reject
-  ) {
-    return await RCTNavigation.startNavigation(  routeJson, isSimulate, resolve,reject);
+  async function startNavigation() {
+    return RCTNavigation
   }
 
   async function stopNavigation(resolve,reject) {
-    return await RCTNavigation.cancel(resolve,reject);
+    // return await RCTNavigation.cancel(resolve,reject);
   }
 
   return { startNavigation, stopNavigation };

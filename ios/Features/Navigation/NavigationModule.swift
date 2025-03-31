@@ -1,111 +1,78 @@
 import Foundation
+import React
 import heresdk
+import UIKit
 
 @objc(NavigationModule)
 class NavigationModule: NSObject {
-    
+    private var mapView: MapView?
+    private var routingEngine: RoutingEngine?
     private var visualNavigator: VisualNavigator?
-    private var herePositioningProvider: HEREPositioningProvider?
-    private var herePositioningSimulator: HEREPositioningSimulator?
-    private var routePrefetcher: RoutePrefetcher?
-    private var dynamicRoutingEngine: DynamicRoutingEngine?
-    private var currentRoute: Route?
+    private var locationSimulator: LocationSimulator?
+    private weak var bridge: RCTBridge?
 
-    override init() {
+    @objc
+    init(bridge: RCTBridge) {
+        self.bridge = bridge
         super.init()
         do {
-            visualNavigator = try VisualNavigator()
-            herePositioningProvider = HEREPositioningProvider()
-            herePositioningSimulator = HEREPositioningSimulator()
-            routePrefetcher = RoutePrefetcher(SDKNativeEngine.sharedInstance!)
-            dynamicRoutingEngine = NavigationModule.createDynamicRoutingEngine()
-        } catch let error {
-            fatalError("Failed to initialize HERE SDK components. Cause: \(error)")
+            self.routingEngine = try RoutingEngine()
+            self.visualNavigator = try VisualNavigator()
+        } catch {
+            print("Failed to initialize HERE SDK: \(error)")
         }
     }
-    
-    @objc(startNavigation:withSimulation:withResolver:withRejecter:)
-    func startNavigation(
-        routeJson: String,
-        isSimulated: Bool,
-        resolve: @escaping RCTPromiseResolveBlock,
-        reject: @escaping RCTPromiseRejectBlock
-    ) {
-        guard let routeData = routeJson.data(using: .utf8),
-              let route = try? JSONDecoder().decode(Route.self, from: routeData),
-              let visualNavigator = visualNavigator else {
-            reject("NAVIGATION_ERROR", "Invalid route data", nil)
-            return
+
+    @objc
+    func initializeMap(_ reactTag: NSNumber) {
+        DispatchQueue.main.async {
+            guard let view = self.bridge?.uiManager.view(forReactTag: reactTag) as? UIView else { return }
+            self.mapView = MapView(frame: view.bounds)
+            if let mapView = self.mapView {
+                view.addSubview(mapView)
+                mapView.mapScene.loadScene(mapScheme: .normalDay) { error in
+                    if let error = error {
+                        print("Error loading map scene: \(error)")
+                    }
+                }
+            }
         }
-        
-        self.currentRoute = route
+    }
+
+    @objc
+    func startNavigation(_ startLat: Double, startLng: Double, destLat: Double, destLng: Double) {
+        guard let routingEngine = self.routingEngine else { return }
+
+        let startWaypoint = Waypoint(coordinates: GeoCoordinates(latitude: startLat, longitude: startLng))
+        let destinationWaypoint = Waypoint(coordinates: GeoCoordinates(latitude: destLat, longitude: destLng))
+
+        routingEngine.calculateRoute(with: [startWaypoint, destinationWaypoint], carOptions: CarOptions()) { error, routes in
+            if let error = error {
+                print("Routing error: \(error)")
+                return
+            }
+            if let route = routes?.first {
+                self.startTurnByTurnNavigation(route: route)
+            }
+        }
+    }
+
+    private func startTurnByTurnNavigation(route: Route) {
+        guard let mapView = self.mapView, let visualNavigator = self.visualNavigator else { return }
+
+        visualNavigator.startRendering(mapView: mapView)
         visualNavigator.route = route
-        
-        let startGeoCoordinates = route.geometry.vertices[0]
-        prefetchMapData(currentGeoCoordinates: startGeoCoordinates)
 
-        if isSimulated {
-            enableRoutePlayback(route: route)
-            resolve("Simulated navigation started.")
-        } else {
-            enableDevicePositioning()
-            resolve("Real navigation started.")
-        }
-
-        startDynamicSearchForBetterRoutes(route)
-    }
-    
-    @objc(stopNavigation:withRejecter:)
-    func stopNavigation(
-        resolve: @escaping RCTPromiseResolveBlock,
-        reject: @escaping RCTPromiseRejectBlock
-    ) {
-        guard let visualNavigator = visualNavigator else {
-            reject("NAVIGATION_ERROR", "VisualNavigator not initialized", nil)
-            return
-        }
-        
-        dynamicRoutingEngine?.stop()
-        routePrefetcher?.stopPrefetchAroundRoute()
-        visualNavigator.route = nil
-        enableDevicePositioning()
-        
-        resolve("Navigation stopped.")
-    }
-    
-    private func enableRoutePlayback(route: Route) {
-        herePositioningProvider?.stopLocating()
-        herePositioningSimulator?.startLocating(locationDelegate: visualNavigator!, route: route)
-    }
-
-    private func enableDevicePositioning() {
-        herePositioningSimulator?.stopLocating()
-        herePositioningProvider?.startLocating(locationDelegate: visualNavigator!, accuracy: .navigation)
-    }
-
-    private func prefetchMapData(currentGeoCoordinates: GeoCoordinates) {
-        routePrefetcher?.prefetchAroundLocationWithRadius(currentLocation: currentGeoCoordinates, radiusInMeters: 2000.0)
-        routePrefetcher?.prefetchAroundRouteOnIntervals(navigator: visualNavigator!)
-    }
-
-    private func startDynamicSearchForBetterRoutes(_ route: Route) {
         do {
-            try dynamicRoutingEngine?.start(route: route, delegate: self)
-        } catch let error {
-            fatalError("Failed to start DynamicRoutingEngine. Cause: \(error)")
+            self.locationSimulator = try LocationSimulator(route: route, options: LocationSimulatorOptions())
+            self.locationSimulator?.delegate = visualNavigator
+            self.locationSimulator?.start()
+        } catch {
+            print("Failed to initialize LocationSimulator: \(error)")
         }
     }
 
-    private class func createDynamicRoutingEngine() -> DynamicRoutingEngine? {
-        do {
-            let options = DynamicRoutingEngineOptions(
-                minTimeDifferencePercentage: 0.1,
-                minTimeDifference: 1,
-                pollInterval: 600 // Poll every 10 minutes
-            )
-            return try DynamicRoutingEngine(options: options)
-        } catch let error {
-            fatalError("Failed to initialize DynamicRoutingEngine. Cause: \(error)")
-        }
+    @objc static func requiresMainQueueSetup() -> Bool {
+        return true
     }
 }
