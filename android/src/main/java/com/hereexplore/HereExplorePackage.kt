@@ -14,6 +14,7 @@ import com.hereexplore.features.config.ConfigModule
 import com.hereexplore.features.pin.PinViewContentManager
 import com.hereexplore.features.pin.PinViewManager
 import com.hereexplore.features.routing.RoutingModule
+import com.hereexplore.features.navigation.NavigationModule
 
 class HereExplorePackage : ReactPackage {
 
@@ -32,7 +33,8 @@ class HereExplorePackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): MutableList<NativeModule> {
     return arrayListOf(
       RoutingModule(reactContext),
-      ConfigModule(reactContext)
+      ConfigModule(reactContext),
+      NavigationModule(reactContext)
     )
   }
 }
